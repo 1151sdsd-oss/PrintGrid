@@ -173,6 +173,16 @@
                                    oninput="updateFieldSample('ZIP', this.value)"
                                    class="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
                         </div>
+
+                        <div class="flex items-center gap-2 pt-1">
+                            <button onclick="exportFillContent()" class="flex-1 text-xs px-2 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded hover:bg-emerald-100 transition text-center">
+                                <i class="fa-solid fa-file-export mr-1"></i>匯出填寫內容
+                            </button>
+                            <label class="flex-1 text-xs px-2 py-1.5 bg-sky-50 text-sky-700 border border-sky-200 rounded hover:bg-sky-100 transition text-center cursor-pointer">
+                                <i class="fa-solid fa-file-import mr-1"></i>匯入填寫內容
+                                <input type="file" id="fill-content-input" accept="application/json,.json" class="hidden" onchange="importFillContent(event)">
+                            </label>
+                        </div>
                     </div>
 
                     <!-- Active Selected Field Property Editor -->
@@ -1549,6 +1559,80 @@ B220000000,李小華,台南市東區長榮路二段163號" class="w-full text-xs
             a.download = 'field-layout.json';
             a.click();
             URL.revokeObjectURL(url);
+        }
+
+        /**
+         * "填寫內容" is just the per-field sample values (+ the raw ID number
+         * used for gender-title derivation) — separate from the field layout
+         * (position/font/etc), so a customer's data can be saved/reloaded
+         * without touching or re-importing the template design.
+         */
+        function exportFillContent() {
+            const data = {};
+            layoutData.fields.forEach(f => { data[f.name] = f.sample || ''; });
+            const payload = {
+                imageWidth: layoutData.imageWidth,
+                imageHeight: layoutData.imageHeight,
+                idNumber: document.getElementById('input-id-number').value || '',
+                data: data
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '填寫內容.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importFillContent(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const parsed = JSON.parse(evt.target.result);
+                    const data = (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.data && typeof parsed.data === 'object')
+                        ? parsed.data : parsed;
+                    if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error('缺少填寫資料內容');
+
+                    if (parsed.imageWidth && parsed.imageHeight &&
+                        (parsed.imageWidth !== layoutData.imageWidth || parsed.imageHeight !== layoutData.imageHeight)) {
+                        const ok = confirm(
+                            '這份填寫內容記錄的底圖尺寸是 ' + parsed.imageWidth + 'x' + parsed.imageHeight +
+                            '，跟目前底圖 ' + layoutData.imageWidth + 'x' + layoutData.imageHeight + ' 不同，可能是套錯版型。仍要匯入嗎？'
+                        );
+                        if (!ok) { e.target.value = ''; return; }
+                    }
+
+                    Object.keys(data).forEach(function(name) {
+                        const field = layoutData.fields.find(f => f.name === name || f.label === name);
+                        if (field) field.sample = data[name];
+                    });
+
+                    if (parsed.idNumber !== undefined) {
+                        const idInput = document.getElementById('input-id-number');
+                        if (idInput) idInput.value = parsed.idNumber;
+                    }
+                    // Sync the quick-fill inputs to whatever ended up on the fields
+                    ['Name', 'Addr', 'Titles', 'ZIP'].forEach(function(name) {
+                        const field = layoutData.fields.find(f => f.name === name);
+                        const input = document.getElementById('fill-input-' + name);
+                        if (field && input) input.value = field.sample || '';
+                    });
+
+                    renderCanvas();
+                    saveStateToLocalStorage();
+                    alert('已匯入填寫內容！');
+                } catch (err) {
+                    alert('匯入失敗：JSON 格式不正確 (' + err.message + ')');
+                } finally {
+                    e.target.value = '';
+                }
+            };
+            reader.readAsText(file);
         }
 
         function importJSON(e) {
